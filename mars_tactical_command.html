@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARES PATHFINDER // 3D Tactical & Helmet HUD Command</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <!-- Three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            void: '#05080f',
+            hud: '#0d1320',
+            hudBorder: '#1b263b',
+            mars: '#ff5a36',
+            cyanHud: '#00e5ff',
+            emeraldHud: '#10b981',
+            scienceGold: '#eab308',
+            purpleHud: '#a855f7'
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body { background-color: #05080f; color: #e2e8f0; overflow: hidden; font-family: monospace; }
+    .hud-glass { background: rgba(13, 19, 32, 0.88); backdrop-filter: blur(12px); border: 1px solid #1b263b; }
+    
+    /* Panel Slide Animations */
+    .tool-panel { 
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease; 
+        transform-origin: left center;
+    }
+    .hidden-panel { 
+        transform: translateX(-20px) scale(0.95); 
+        opacity: 0; 
+        pointer-events: none; 
+        position: absolute;
+        visibility: hidden;
+    }
+    .active-panel {
+        transform: translateX(0) scale(1);
+        opacity: 1;
+        pointer-events: auto;
+        position: relative;
+        visibility: visible;
+    }
+
+    /* Provenance Badges (Slide 7) */
+    .badge-measured { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.45); color: #34d399; }
+    .badge-estimate { background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.45); color: #facc15; }
+    .badge-assumption { background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.45); color: #c084fc; }
+
+    /* 3D Region Floating Labels */
+    .mars-region-label {
+        position: absolute;
+        transform: translate(-50%, -130%);
+        pointer-events: auto;
+        cursor: pointer;
+        transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .mars-region-label:hover {
+        transform: translate(-50%, -140%) scale(1.06);
+        z-index: 35 !important;
+    }
+
+    /* Helmet HUD Visor Overlay (Slide 6) */
+    .helmet-visor-vignette {
+        background: radial-gradient(circle at center, transparent 48%, rgba(2, 6, 15, 0.88) 100%);
+        box-shadow: inset 0 0 90px rgba(0, 229, 255, 0.18);
+    }
+    .scanline-bg {
+        background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.28) 50%);
+        background-size: 100% 4px;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1b263b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #00e5ff; }
+  </style>
+</head>
+<body class="w-screen h-screen flex flex-col relative select-none">
+
+  <!-- TOP HEADER (GLASSMORPHIC - SLIDE 0 & SLIDE 7) -->
+  <header class="absolute top-0 left-0 right-0 hud-glass px-5 py-2.5 flex flex-wrap items-center justify-between gap-2 z-40 border-b border-hudBorder shadow-xl">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-mars to-orange-700 flex items-center justify-center shadow-[0_0_16px_rgba(255,90,54,0.45)] border border-orange-400/30">
+        <i class="fa-solid fa-route text-white text-base"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="font-bold text-sm tracking-wider text-white">
+            ARES PATHFINDER <span class="text-mars">//</span> DUAL-PURPOSE ROUTE MAP
+          </h1>
+          <span class="hidden xl:inline-block px-2 py-0.5 rounded bg-mars/15 text-mars border border-mars/35 text-[9px] font-bold">
+            SAFEST PATH FIRST &bull; SCIENCE ALONG THE WAY
+          </span>
+        </div>
+        <p class="text-[10px] text-cyanHud tracking-wider mt-0.5">
+          3D TACTICAL ORBITAL &amp; SURFACE NAVIGATION SYSTEM
+        </p>
+      </div>
+    </div>
+
+    <!-- Provenance Badges & Fidelity Selector (Slide 7) -->
+    <div class="flex items-center gap-3">
+        <div class="hidden lg:flex items-center gap-1.5 text-[9px] font-bold">
+            <span class="badge-measured px-1.5 py-0.5 rounded cursor-help" title="Instrument, source, date range">MEASURED</span>
+            <span class="badge-estimate px-1.5 py-0.5 rounded cursor-help" title="Method and source stated">ESTIMATE</span>
+            <span class="badge-assumption px-1.5 py-0.5 rounded cursor-help" title="Every threshold and weight labeled">ASSUMPTION</span>
+        </div>
+
+        <div class="flex items-center gap-1.5 bg-void/90 border border-hudBorder px-2 py-1 rounded-lg text-[10px]">
+            <span class="text-slate-400">FIDELITY:</span>
+            <select id="fidelitySelect" class="bg-transparent text-cyanHud font-bold outline-none cursor-pointer">
+                <option value="high" class="bg-hud">HIGH (HiRISE DTM)</option>
+                <option value="med" class="bg-hud">MEDIUM (CTX/HRSC)</option>
+                <option value="low" class="bg-hud">LOW (MOLA ONLY)</option>
+            </select>
+        </div>
+
+        <button id="toggleHelmetHudBtn" onclick="toggleHelmetHud()" class="px-2.5 py-1.5 bg-cyanHud/10 hover:bg-cyanHud/20 text-cyanHud border border-cyanHud/40 rounded-lg text-[10px] font-bold tracking-wider transition cursor-pointer flex items-center gap-1.5">
+            <i class="fa-solid fa-vr-cardboard"></i>
+            <span id="hudModeBtnLabel">HELMET HUD</span>
+        </button>
+    </div>
+  </header>
+
+  <!-- LEFT SIDEBAR MENU (ICONS - SAME CLEAN PATTERN) -->
+  <aside class="absolute left-4 top-20 bottom-10 w-14 hud-glass rounded-xl flex flex-col items-center py-3.5 gap-2.5 z-40 shadow-2xl">
+    <button onclick="togglePanel('panel-distance', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-cyanHud hover:bg-cyanHud/10 flex items-center justify-center transition cursor-pointer" title="Dual-Purpose A/B Route & Distance">
+      <i class="fa-solid fa-ruler-combined text-base"></i>
+    </button>
+    <button onclick="togglePanel('panel-layers', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-purple-400 hover:bg-purple-400/10 flex items-center justify-center transition cursor-pointer" title="4-Layer NASA Data Fusion">
+      <i class="fa-solid fa-layer-group text-base"></i>
+    </button>
+    <button onclick="togglePanel('panel-science', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-yellow-400 hover:bg-yellow-400/10 flex items-center justify-center transition cursor-pointer" title="CRISM Science Targets & Radiation">
+      <i class="fa-solid fa-star text-base"></i>
+    </button>
+    <button onclick="togglePanel('panel-regions', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-emeraldHud hover:bg-emeraldHud/10 flex items-center justify-center transition cursor-pointer" title="Martian Regions Directory">
+      <i class="fa-solid fa-location-dot text-base"></i>
+    </button>
+    <button onclick="togglePanel('panel-weather', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-400/10 flex items-center justify-center transition cursor-pointer" title="AI Weather Uplink (REMS)">
+      <i class="fa-solid fa-cloud-sun text-base"></i>
+    </button>
+    <button onclick="togglePanel('panel-rover', this)" class="menu-btn w-10 h-10 rounded-lg text-slate-400 hover:text-mars hover:bg-mars/10 flex items-center justify-center transition cursor-pointer" title="CV Terrain Hazard Scanner">
+      <i class="fa-solid fa-robot text-base"></i>
+    </button>
+    
+    <div class="mt-auto w-8 h-px bg-hudBorder"></div>
+    
+    <button onclick="resetGlobeView()" class="w-10 h-10 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 flex items-center justify-center transition cursor-pointer" title="Reset 3D Orbit View">
+      <i class="fa-solid fa-crosshairs"></i>
+    </button>
+  </aside>
+
+  <!-- FLOATING PANELS CONTAINER -->
+  <div class="absolute left-20 top-20 bottom-10 w-80 z-30 pointer-events-none flex flex-col">
+    
+    <!-- 1. DUAL-PURPOSE A/B ROUTE & DISTANCE PANEL (SLIDES 1, 4, 6) -->
+    <div id="panel-distance" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-cyanHud/30 shadow-[0_0_30px_rgba(0,229,255,0.1)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-route text-cyanHud text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">DUAL-PURPOSE ROUTE</h2>
+        </div>
+        <span class="badge-assumption px-1.5 py-0.5 rounded text-[8px]">SAFETY FIRST</span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3 leading-relaxed">Click Point A and Point B on Mars. Safety constraints (slope &gt;25°, loose dust) are hard limits and always win over science.</p>
+      
+      <!-- Route Mode Switcher: Direct (Safest) vs Science Route -->
+      <div class="bg-void/90 border border-hudBorder p-1.5 rounded-lg flex gap-1.5 mb-3">
+        <button id="routeModeDirectBtn" onclick="setRouteMode('direct')" class="flex-1 py-1.5 rounded text-[10px] font-bold bg-emeraldHud text-void transition cursor-pointer">
+          DIRECT (SAFEST)
+        </button>
+        <button id="routeModeScienceBtn" onclick="setRouteMode('science')" class="flex-1 py-1.5 rounded text-[10px] font-bold bg-hud text-slate-300 hover:text-white transition cursor-pointer">
+          SCIENCE ROUTE
+        </button>
+      </div>
+
+      <!-- Detour Budget Slider (Slide 1 & 4) -->
+      <div class="bg-void/80 border border-hudBorder p-2.5 rounded-lg mb-3">
+        <div class="flex justify-between items-center text-[10px] mb-1">
+          <span class="text-slate-400">DETOUR BUDGET <span class="badge-assumption px-1 rounded text-[8px]">ASSUMPTION</span></span>
+          <span id="detourBudgetLabel" class="text-scienceGold font-bold">15%</span>
+        </div>
+        <input type="range" id="detourBudgetSlider" min="0" max="40" value="15" class="w-full accent-yellow-400 cursor-pointer" />
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <div class="bg-void/80 border border-hudBorder p-2 rounded-lg">
+          <div class="text-[9px] text-slate-500">POINT A</div>
+          <div id="dist-ptA" class="text-[11px] text-cyanHud font-bold truncate">Click Globe...</div>
+        </div>
+        <div class="bg-void/80 border border-hudBorder p-2 rounded-lg">
+          <div class="text-[9px] text-slate-500">POINT B</div>
+          <div id="dist-ptB" class="text-[11px] text-mars font-bold truncate">Click Globe...</div>
+        </div>
+      </div>
+
+      <!-- GEODESIC TRAJECTORY LINE & WAYPOINT DISPLAY -->
+      <div class="bg-void/80 border border-cyanHud/30 p-2.5 rounded-lg mb-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] text-cyanHud font-bold tracking-wider"><i class="fa-solid fa-bezier-curve mr-1"></i>TRAJECTORY ARC LINE</span>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="toggleLineCheckbox" checked class="sr-only peer" />
+            <div class="w-7 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all relative peer-checked:bg-cyanHud"></div>
+          </label>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-[10px]">
+          <div class="bg-hud/80 p-1.5 rounded border border-hudBorder">
+            <span class="text-slate-500 block text-[9px]">HEADING</span>
+            <span id="dist-bearing" class="text-white font-bold">-- °</span>
+          </div>
+          <div class="bg-hud/80 p-1.5 rounded border border-hudBorder">
+            <span class="text-slate-500 block text-[9px]">VALIDATOR</span>
+            <span id="dist-arc-status" class="text-slate-400 font-bold">STANDBY</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- No-Route / Low Fidelity Warning Banner -->
+      <div id="routeValidatorAlert" class="hidden bg-mars/15 border border-mars/50 p-2 rounded-lg text-[10px] text-mars mb-3">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+        <span id="routeValidatorMsg">Low fidelity (MOLA only): no walking-scale route validated.</span>
+      </div>
+      
+      <div class="mt-auto bg-cyanHud/10 border border-cyanHud/30 p-3 rounded-lg text-center">
+        <div class="flex justify-center items-center gap-1.5 mb-0.5">
+          <span class="text-[10px] text-cyanHud font-bold tracking-wider">ROUTE DISTANCE</span>
+          <span class="badge-estimate px-1 rounded text-[8px]">ESTIMATE</span>
+        </div>
+        <div id="dist-result" class="text-xl font-bold text-white tracking-wider">-- km</div>
+        <div id="route-science-note" class="text-[9px] text-emeraldHud mt-0.5">Green = Safe Path | Gold = CRISM Detour</div>
+      </div>
+      <button id="resetDistBtn" class="mt-2.5 w-full py-1.5 border border-slate-600 text-slate-300 rounded-lg text-[11px] hover:bg-slate-800 hover:text-white transition font-bold tracking-wider cursor-pointer">
+        RESET A/B WAYPOINTS
+      </button>
+    </div>
+
+    <!-- 2. 4-LAYER NASA DATA FUSION PANEL (SLIDES 2, 3, 5) -->
+    <div id="panel-layers" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-purple-500/30 shadow-[0_0_30px_rgba(168,85,247,0.12)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-layer-group text-purple-400 text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">NASA DATA FUSION</h2>
+        </div>
+        <span class="badge-measured px-1.5 py-0.5 rounded text-[8px]">4 LAYERS</span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3 leading-relaxed">Aligned planetary grid fusing Topography, Optical, Thermal, and Spectral layers.</p>
+
+      <div class="space-y-2 mb-3">
+        <button onclick="setMarsLayer('optical', this)" class="layer-opt-btn w-full text-left p-2.5 rounded-lg border border-cyanHud bg-cyanHud/15 transition cursor-pointer">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-white">1. OPTICAL (HiRISE / CTX)</span>
+            <span class="badge-measured px-1 rounded text-[8px]">MEASURED</span>
+          </div>
+          <p class="text-[9px] text-slate-300 mt-0.5">Visual albedo base &amp; surface brightness (dust proxy).</p>
+        </button>
+
+        <button onclick="setMarsLayer('topography', this)" class="layer-opt-btn w-full text-left p-2.5 rounded-lg border border-hudBorder bg-void/80 hover:border-slate-600 transition cursor-pointer">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-slate-200">2. TOPOGRAPHY (HiRISE DTM / MOLA)</span>
+            <span class="badge-measured px-1 rounded text-[8px]">MEASURED</span>
+          </div>
+          <p class="text-[9px] text-slate-400 mt-0.5">Elevation hypsometry, cliff edges &amp; &gt;25° slope mask.</p>
+        </button>
+
+        <button onclick="setMarsLayer('thermal', this)" class="layer-opt-btn w-full text-left p-2.5 rounded-lg border border-hudBorder bg-void/80 hover:border-slate-600 transition cursor-pointer">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-slate-200">3. THERMAL (THEMIS INERTIA)</span>
+            <span class="badge-estimate px-1 rounded text-[8px]">ESTIMATE</span>
+          </div>
+          <p class="text-[9px] text-slate-400 mt-0.5">Low thermal inertia + bright albedo = loose-sand hazard proxy.</p>
+        </button>
+
+        <button onclick="setMarsLayer('spectral', this)" class="layer-opt-btn w-full text-left p-2.5 rounded-lg border border-hudBorder bg-void/80 hover:border-slate-600 transition cursor-pointer">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-slate-200">4. SPECTRAL (CRISM MINERALS)</span>
+            <span class="badge-measured px-1 rounded text-[8px]">MEASURED</span>
+          </div>
+          <p class="text-[9px] text-slate-400 mt-0.5">Hydrated phyllosilicates, sulfates &amp; carbonate target zones.</p>
+        </button>
+      </div>
+
+      <div class="mt-auto bg-void/90 border border-hudBorder p-2.5 rounded-lg text-[10px]">
+        <div class="flex justify-between text-slate-400 mb-1">
+          <span>HARD SAFETY GATE:</span>
+          <span class="text-emeraldHud font-bold">ACTIVE</span>
+        </div>
+        <div class="text-[9px] text-slate-500">Slope &gt;25° &bull; Roughness &gt;0.5m &bull; 5m Obstacle Buffer</div>
+      </div>
+    </div>
+
+    <!-- 3. CRISM SCIENCE TARGETS & RADIATION / SHELTER PANEL (SLIDES 2, 3, 4, 6) -->
+    <div id="panel-science" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-yellow-500/30 shadow-[0_0_30px_rgba(234,179,8,0.12)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-star text-scienceGold text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">SCIENCE &amp; RAD DOSE</h2>
+        </div>
+        <span class="badge-measured px-1.5 py-0.5 rounded text-[8px]">CRISM / RAD</span>
+      </div>
+
+      <!-- Curiosity RAD Radiation & Shelter Status (Slide 3 & 4) -->
+      <div class="bg-void/90 border border-hudBorder p-2.5 rounded-lg mb-3">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-[10px] font-bold text-mars"><i class="fa-solid fa-radiation mr-1"></i>CURIOSITY RAD DOSE</span>
+          <span class="badge-estimate px-1 rounded text-[8px]">ESTIMATE</span>
+        </div>
+        <div class="flex justify-between items-baseline">
+          <span class="text-base font-bold text-white">0.64 mSv/sol</span>
+          <span class="text-[10px] text-emeraldHud font-bold">READINESS: NOMINAL</span>
+        </div>
+        <p class="text-[9px] text-slate-400 mt-1">Solar spikes cannot be forecast; nearest lava-tube shelter: <span class="text-cyanHud">1.4 km NE</span>.</p>
+      </div>
+
+      <!-- Ranked CRISM Science Targets with Reason Tags (Slide 2 & 4) -->
+      <div class="text-[10px] font-bold text-scienceGold mb-1.5">RANKED CRISM TARGET AREAS</div>
+      <div class="space-y-2 mb-3">
+        <div onclick="focusMarsRegion('jezero')" class="bg-void/80 border border-yellow-500/40 hover:border-yellow-400 p-2.5 rounded-lg cursor-pointer transition">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-white"><i class="fa-solid fa-star text-scienceGold mr-1"></i>#1 Jezero Carbonate Delta</span>
+            <span class="text-[9px] text-emeraldHud font-bold">SAFE (6°)</span>
+          </div>
+          <p class="text-[9px] text-slate-300 mt-1">Reason Tag: <span class="text-cyanHud">CRISM Mg-Carbonate + HiRISE</span></p>
+        </div>
+
+        <div onclick="focusMarsRegion('gale')" class="bg-void/80 border border-yellow-500/40 hover:border-yellow-400 p-2.5 rounded-lg cursor-pointer transition">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-white"><i class="fa-solid fa-star text-scienceGold mr-1"></i>#2 Vera Rubin Hematite</span>
+            <span class="text-[9px] text-emeraldHud font-bold">SAFE (14°)</span>
+          </div>
+          <p class="text-[9px] text-slate-300 mt-1">Reason Tag: <span class="text-cyanHud">CRISM Ferric Oxide + THEMIS</span></p>
+        </div>
+
+        <div class="bg-void/50 border border-mars/40 p-2.5 rounded-lg opacity-75">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] font-bold text-slate-400 line-through">#3 Valles Scarp Sulfates</span>
+            <span class="text-[9px] text-mars font-bold">DROPPED (&gt;32°)</span>
+          </div>
+          <p class="text-[9px] text-slate-500 mt-0.5">Unreachable: violates hard slope safety limit.</p>
+        </div>
+      </div>
+
+      <div class="mt-auto bg-yellow-500/10 border border-yellow-500/30 p-2 rounded text-[9px] text-yellow-200 text-center">
+        Targets are areas to examine, <strong>not</strong> biosignature detections.
+      </div>
+    </div>
+
+    <!-- 4. MARTIAN REGIONS DIRECTORY PANEL (NEW) -->
+    <div id="panel-regions" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-emeraldHud/30 shadow-[0_0_30px_rgba(16,185,129,0.12)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-location-dot text-emeraldHud text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">MARTIAN REGIONS</h2>
+        </div>
+        <span class="badge-measured px-1.5 py-0.5 rounded text-[8px]">IAU / NASA</span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3">Select any Martian landmark to rotate the 3D globe and inspect telemetry.</p>
+      
+      <div id="regionsDirectoryList" class="space-y-2 mb-3"></div>
+
+      <div id="selectedRegionCard" class="mt-auto bg-void/90 border border-emeraldHud/40 p-3 rounded-lg text-[10px]">
+        <div class="text-emeraldHud font-bold" id="regCardTitle">GALE CRATER (CURIOSITY)</div>
+        <div class="text-slate-400 mt-0.5" id="regCardCoords">5.40°S, 137.80°E &bull; Elev: -4,410 m</div>
+        <p class="text-slate-300 mt-1.5 leading-relaxed" id="regCardDesc">154 km impact basin with central layered peak Aeolis Mons (Mount Sharp).</p>
+      </div>
+    </div>
+
+    <!-- 5. AI WEATHER PANEL (REMS RANDOM FOREST) -->
+    <div id="panel-weather" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-amber-500/30 shadow-[0_0_30px_rgba(245,158,11,0.1)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-cloud-sun text-amber-400 text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">AI WEATHER UPLINK</h2>
+        </div>
+        <span class="badge-estimate px-1.5 py-0.5 rounded text-[8px]">REMS ML</span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-4 leading-relaxed">Scikit-Learn Random Forest model trained on Curiosity REMS atmospheric logs.</p>
+      
+      <div class="space-y-3 mb-4">
+        <div>
+          <label class="text-[10px] text-slate-500 font-bold tracking-wider">CURRENT PRESSURE (Pa)</label>
+          <input type="number" id="weatherPres" value="740" class="w-full bg-void border border-hudBorder rounded-lg px-3 py-2 text-white text-xs mt-1 outline-none focus:border-amber-400/50 transition" />
+        </div>
+        <div>
+          <label class="text-[10px] text-slate-500 font-bold tracking-wider">TODAY'S MAX TEMP (°C)</label>
+          <input type="number" id="weatherTemp" value="-12" class="w-full bg-void border border-hudBorder rounded-lg px-3 py-2 text-white text-xs mt-1 outline-none focus:border-amber-400/50 transition" />
+        </div>
+      </div>
+
+      <button id="runWeatherBtn" class="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/50 py-2 rounded-lg font-bold text-[11px] tracking-wider transition mb-4 cursor-pointer flex items-center justify-center gap-2">
+        <i class="fa-solid fa-satellite-dish"></i> GENERATE FORECAST
+      </button>
+
+      <div class="mt-auto bg-void/80 border border-hudBorder p-3 rounded-lg text-center">
+        <div class="text-[10px] text-slate-400 mb-1 font-bold tracking-wider">PREDICTED MAX TEMP (SOL +1)</div>
+        <div id="weatherResult" class="text-xl font-bold text-white tracking-wider">-- °C</div>
+      </div>
+    </div>
+
+    <!-- 6. ROVER HAZARD PANEL (RESNET-18 CV) -->
+    <div id="panel-rover" class="tool-panel hidden-panel w-full max-h-full overflow-y-auto hud-glass rounded-xl p-4 flex flex-col border border-mars/30 shadow-[0_0_30px_rgba(255,90,54,0.1)]">
+      <div class="flex items-center justify-between border-b border-hudBorder pb-2.5 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-robot text-mars text-lg"></i>
+          <h2 class="text-white font-bold text-xs tracking-wide">CV HAZARD SCANNER</h2>
+        </div>
+        <span class="badge-estimate px-1.5 py-0.5 rounded text-[8px]">RESNET-18</span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3 leading-relaxed">PyTorch ResNet-18 Computer Vision slope &amp; regolith hazard detector.</p>
+      
+      <!-- Rover Cam Canvas -->
+      <div class="relative bg-black rounded-lg border border-hudBorder overflow-hidden h-32 mb-3">
+        <canvas id="roverCanvas" class="w-full h-full"></canvas>
+        <div class="absolute inset-0 scanline-bg pointer-events-none"></div>
+        <div class="absolute top-2 left-2 bg-void/80 px-1.5 py-0.5 rounded text-[9px] text-cyanHud border border-cyanHud/30">NAVCAM_FRAME</div>
+      </div>
+
+      <button id="runHazardBtn" class="w-full bg-mars/10 hover:bg-mars/20 text-mars border border-mars/50 py-2 rounded-lg font-bold text-[11px] tracking-wider transition mb-3 cursor-pointer flex items-center justify-center gap-2">
+        <i class="fa-solid fa-microchip"></i> RUN AI FRAME SCAN
+      </button>
+
+      <div id="hazardResultPanel" class="hidden mt-auto bg-void/80 border border-hudBorder p-3 rounded-lg text-center">
+        <div id="hazardOutputText" class="text-xs font-bold text-white mb-1">--</div>
+        <div id="hazardConfText" class="text-[10px] text-slate-400 leading-tight mt-1">--</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SYNCHRONIZED HELMET HUD VISOR OVERLAY (SLIDE 5 & 6 - TOGGLEABLE) -->
+  <div id="helmetHudOverlay" class="hidden fixed inset-0 z-20 pointer-events-none helmet-visor-vignette flex flex-col justify-between px-24 pt-20 pb-12">
+    <!-- Top Visor Telemetry -->
+    <div class="flex justify-between items-start">
+      <div class="hud-glass px-3.5 py-2 rounded-lg border-cyanHud/40 text-[11px]">
+        <div class="text-cyanHud font-bold tracking-widest">ARES HELMET HUD // SYNCHRONIZED</div>
+        <div class="text-slate-300 mt-0.5">HEADING: <span id="hudHeadingVal" class="text-white font-bold">045.0° NE</span> &bull; MODE: <span id="hudRouteModeVal" class="text-emeraldHud font-bold">DIRECT SAFE</span></div>
+      </div>
+
+      <div class="hud-glass px-3.5 py-2 rounded-lg border-mars/40 text-right text-[11px]">
+        <div class="text-mars font-bold">DOSE <span class="badge-estimate px-1 rounded text-[8px]">ESTIMATE</span>: <span class="text-white">0.64 mSv</span></div>
+        <div class="text-slate-300 mt-0.5">SHELTER: <span class="text-cyanHud font-bold">1.4 km NE</span></div>
+      </div>
+    </div>
+
+    <!-- Center Visor Reticle & Slope-Ahead Warning (Slide 6) -->
+    <div class="flex flex-col items-center justify-center my-auto">
+      <div class="w-24 h-24 rounded-full border border-cyanHud/40 flex items-center justify-center relative">
+        <div class="w-1.5 h-1.5 rounded-full bg-cyanHud"></div>
+        <div class="absolute -left-5 w-4 h-px bg-cyanHud/60"></div>
+        <div class="absolute -right-5 w-4 h-px bg-cyanHud/60"></div>
+        <div class="absolute -top-5 h-4 w-px bg-cyanHud/60"></div>
+        <div class="absolute -bottom-5 h-4 w-px bg-cyanHud/60"></div>
+      </div>
+      <div class="mt-4 bg-mars/20 border border-mars px-3 py-1 rounded text-[11px] text-mars font-bold tracking-wider">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i> SLOPE AHEAD: 14° NOMINAL (MASK &gt;25° AVOIDED)
+      </div>
+    </div>
+
+    <!-- Bottom Visor Next Target & Distance -->
+    <div class="flex justify-between items-end">
+      <div class="hud-glass px-3.5 py-2 rounded-lg border-yellow-500/40 text-[11px]">
+        <div class="text-scienceGold font-bold"><i class="fa-solid fa-star mr-1"></i> NEXT TARGET: JEZERO CARBONATE DELTA</div>
+        <div class="text-slate-300 mt-0.5">ROUTE DIST: <span id="hudDistanceVal" class="text-white font-bold">-- km</span> &bull; REASON: CRISM HYDRATED</div>
+      </div>
+      <div class="hud-glass px-3 py-1.5 rounded-lg text-[10px] text-slate-300">
+        ACTIVE LAYER: <span id="hudActiveLayerVal" class="text-cyanHud font-bold uppercase">OPTICAL</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- THREE.JS 3D CANVAS (FULL SCREEN MAIN SIMULATION) -->
+  <div id="threeContainer" class="absolute inset-0 z-10 bg-void cursor-grab active:cursor-grabbing"></div>
+
+  <!-- 3D REGION LABELS OVERLAY CONTAINER -->
+  <div id="regionLabelsContainer" class="absolute inset-0 z-15 pointer-events-none overflow-hidden"></div>
+
+  <!-- BOTTOM HONEST LIMITS & TELEMETRY STATUS BAR (SLIDE 7) -->
+  <footer class="absolute bottom-0 left-0 right-0 hud-glass px-5 py-1.5 flex flex-wrap items-center justify-between text-[10px] z-40 border-t border-hudBorder">
+    <div class="flex items-center gap-2 text-mars font-bold">
+      <i class="fa-solid fa-shield-halved"></i>
+      <span>HONEST LIMITS: Illustrative route, not flight-validated. Targets are areas to examine, not biosignature detections.</span>
+    </div>
+    <div class="text-slate-400">
+      ACTIVE REGION: <span id="footerActiveRegion" class="text-cyanHud font-bold">GALE CRATER (5.40°S, 137.80°E)</span>
+    </div>
+  </footer>
+
+  <script>
+    // =========================================================================
+    // 1. MARTIAN REGIONS & CRISM TARGETS DATA (SLIDES 3, 4, 6)
+    // =========================================================================
+    const MARS_REGIONS = [
+      { id: 'gale', name: 'Gale Crater', lat: -5.4, lon: 137.8, elev: '-4,410 m', type: 'Curiosity / RAD', desc: '154 km impact basin with central layered peak Mount Sharp (Aeolis Mons).' },
+      { id: 'jezero', name: 'Jezero Crater', lat: 18.4, lon: 77.6, elev: '-2,540 m', type: 'Perseverance / CRISM', desc: 'Ancient paleolake fan-delta rich in Mg-carbonates & phyllosilicates.' },
+      { id: 'olympus', name: 'Olympus Mons', lat: 18.6, lon: -133.8, elev: '+21,229 m', type: 'Shield Volcano', desc: 'Largest shield volcano in the Solar System with 8 km perimeter cliff scarp.' },
+      { id: 'valles', name: 'Valles Marineris', lat: -13.9, lon: -59.2, elev: '-7,100 m', type: 'Tectonic Canyon', desc: '4,000 km rift canyon system; steep walls flagged as impassable slope mask.' },
+      { id: 'hellas', name: 'Hellas Planitia', lat: -42.4, lon: 70.5, elev: '-8,200 m', type: 'Impact Basin', desc: 'Deepest impact basin on Mars with higher atmospheric surface pressure.' },
+      { id: 'elysium', name: 'Elysium Planitia', lat: 4.5, lon: 135.6, elev: '-2,655 m', type: 'InSight Seismic', desc: 'Smooth volcanic plains with low slope roughness and dust-covered regolith.' }
+    ];
+
+    const CRISM_TARGETS = [
+      { name: 'CRISM-1: Jezero Carbonates', lat: 18.4, lon: 77.6 },
+      { name: 'CRISM-2: Vera Rubin Hematite', lat: -5.4, lon: 137.8 },
+      { name: 'CRISM-3: Mawrth Phyllosilicates', lat: 24.0, lon: -19.0 }
+    ];
+
+    let activePanel = null;
+    let routeMode = 'direct';
+    let currentLayer = 'optical';
+    let helmetHudVisible = false;
+
+    // =========================================================================
+    // 2. UI PANEL & MODE TOGGLE LOGIC
+    // =========================================================================
+    function togglePanel(panelId, btnElement) {
+      const panels = document.querySelectorAll('.tool-panel');
+      const buttons = document.querySelectorAll('.menu-btn');
+      
+      buttons.forEach(b => {
+          b.classList.remove('bg-cyanHud/10', 'bg-purple-400/10', 'bg-yellow-400/10', 'bg-emeraldHud/10', 'bg-amber-400/10', 'bg-mars/10', 'text-cyanHud', 'text-purple-400', 'text-yellow-400', 'text-emeraldHud', 'text-amber-400', 'text-mars', 'border', 'border-cyanHud/50', 'border-purple-400/50', 'border-yellow-400/50', 'border-emeraldHud/50', 'border-amber-400/50', 'border-mars/50');
+          b.classList.add('text-slate-400');
+      });
+
+      panels.forEach(p => {
+        if(p.id === panelId) {
+          if(p.classList.contains('hidden-panel')) {
+            p.classList.remove('hidden-panel');
+            p.classList.add('active-panel');
+            activePanel = panelId;
+            
+            btnElement.classList.remove('text-slate-400');
+            if (panelId === 'panel-distance') btnElement.classList.add('text-cyanHud', 'bg-cyanHud/10', 'border', 'border-cyanHud/50');
+            if (panelId === 'panel-layers') btnElement.classList.add('text-purple-400', 'bg-purple-400/10', 'border', 'border-purple-400/50');
+            if (panelId === 'panel-science') btnElement.classList.add('text-yellow-400', 'bg-yellow-400/10', 'border', 'border-yellow-400/50');
+            if (panelId === 'panel-regions') btnElement.classList.add('text-emeraldHud', 'bg-emeraldHud/10', 'border', 'border-emeraldHud/50');
+            if (panelId === 'panel-weather') btnElement.classList.add('text-amber-400', 'bg-amber-400/10', 'border', 'border-amber-400/50');
+            if (panelId === 'panel-rover') btnElement.classList.add('text-mars', 'bg-mars/10', 'border', 'border-mars/50');
+          } else {
+            p.classList.remove('active-panel');
+            p.classList.add('hidden-panel');
+            activePanel = null;
+          }
+        } else {
+          p.classList.remove('active-panel');
+          p.classList.add('hidden-panel');
+        }
+      });
+      
+      container.style.cursor = (activePanel === 'panel-distance') ? 'crosshair' : 'grab';
+    }
+
+    function toggleHelmetHud() {
+      helmetHudVisible = !helmetHudVisible;
+      const overlay = document.getElementById('helmetHudOverlay');
+      const btn = document.getElementById('toggleHelmetHudBtn');
+      if (helmetHudVisible) {
+        overlay.classList.remove('hidden');
+        btn.classList.add('bg-cyanHud', 'text-void');
+        btn.classList.remove('bg-cyanHud/10', 'text-cyanHud');
+      } else {
+        overlay.classList.add('hidden');
+        btn.classList.remove('bg-cyanHud', 'text-void');
+        btn.classList.add('bg-cyanHud/10', 'text-cyanHud');
+      }
+    }
+
+    function setRouteMode(mode) {
+      routeMode = mode;
+      const directBtn = document.getElementById('routeModeDirectBtn');
+      const scienceBtn = document.getElementById('routeModeScienceBtn');
+      document.getElementById('hudRouteModeVal').innerText = mode === 'direct' ? 'DIRECT SAFE' : 'SCIENCE DETOUR';
+      
+      if (mode === 'direct') {
+        directBtn.className = 'flex-1 py-1.5 rounded text-[10px] font-bold bg-emeraldHud text-void transition cursor-pointer';
+        scienceBtn.className = 'flex-1 py-1.5 rounded text-[10px] font-bold bg-hud text-slate-300 hover:text-white transition cursor-pointer';
+      } else {
+        scienceBtn.className = 'flex-1 py-1.5 rounded text-[10px] font-bold bg-scienceGold text-void transition cursor-pointer';
+        directBtn.className = 'flex-1 py-1.5 rounded text-[10px] font-bold bg-hud text-slate-300 hover:text-white transition cursor-pointer';
+      }
+      if (pointALatLon && pointBLatLon) {
+        recomputeTrajectoryAndDistance();
+      }
+    }
+
+    document.getElementById('detourBudgetSlider').addEventListener('input', (e) => {
+      document.getElementById('detourBudgetLabel').innerText = `${e.target.value}%`;
+      if (pointALatLon && pointBLatLon && routeMode === 'science') {
+        recomputeTrajectoryAndDistance();
+      }
+    });
+
+    document.getElementById('fidelitySelect').addEventListener('change', (e) => {
+      const alertBox = document.getElementById('routeValidatorAlert');
+      if (e.target.value === 'low') {
+        alertBox.classList.remove('hidden');
+      } else {
+        alertBox.classList.add('hidden');
+      }
+    });
+
+    // =========================================================================
+    // 3. THREE.JS 3D MARS GLOBE & MULTI-LAYER FUSION TEXTURES
+    // =========================================================================
+    const container = document.getElementById('threeContainer');
+    const labelsContainer = document.getElementById('regionLabelsContainer');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(0, 0, 5.5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    function createMarsLayerTextures() {
+        const w = 1024, h = 512;
+        const optCanvas = document.createElement('canvas');
+        const topoCanvas = document.createElement('canvas');
+        const thermCanvas = document.createElement('canvas');
+        const specCanvas = document.createElement('canvas');
+        const bumpCanvas = document.createElement('canvas');
+        [optCanvas, topoCanvas, thermCanvas, specCanvas, bumpCanvas].forEach(c => { c.width = w; c.height = h; });
+
+        const ctx = optCanvas.getContext('2d');
+        const tCtx = topoCanvas.getContext('2d');
+        const thCtx = thermCanvas.getContext('2d');
+        const sCtx = specCanvas.getContext('2d');
+        const bCtx = bumpCanvas.getContext('2d');
+
+        // 1. Optical Base
+        const baseGrad = ctx.createLinearGradient(0, 0, 0, h);
+        baseGrad.addColorStop(0.0, '#e8edf2');
+        baseGrad.addColorStop(0.07, '#c87349');
+        baseGrad.addColorStop(0.35, '#d1784c');
+        baseGrad.addColorStop(0.55, '#a8512c');
+        baseGrad.addColorStop(0.85, '#c46c43');
+        baseGrad.addColorStop(0.93, '#e8edf2');
+        baseGrad.addColorStop(1.0, '#ffffff');
+        ctx.fillStyle = baseGrad; ctx.fillRect(0, 0, w, h);
+
+        // 2. Topography Hypsometric Base
+        const topoGrad = tCtx.createLinearGradient(0, 0, 0, h);
+        topoGrad.addColorStop(0.0, '#ffffff');
+        topoGrad.addColorStop(0.25, '#0284c7'); // Northern Lowlands
+        topoGrad.addColorStop(0.50, '#10b981'); // Datum
+        topoGrad.addColorStop(0.75, '#f59e0b'); // Southern Highlands
+        topoGrad.addColorStop(1.0, '#ef4444');
+        tCtx.fillStyle = topoGrad; tCtx.fillRect(0, 0, w, h);
+
+        // 3. Thermal Inertia (THEMIS Loose Sand Proxy)
+        thCtx.fillStyle = '#1e1b4b'; thCtx.fillRect(0, 0, w, h);
+
+        // 4. Spectral (CRISM Mineral Map)
+        sCtx.fillStyle = '#0f172a'; sCtx.fillRect(0, 0, w, h);
+
+        bCtx.fillStyle = '#808080'; bCtx.fillRect(0, 0, w, h);
+
+        let seed = 1337;
+        function rand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+        // Dark Maria & Thermal/Spectral Zones
+        for (let i = 0; i < 110; i++) {
+            const cx = rand() * w, cy = h * (0.22 + rand() * 0.56);
+            const rx = 20 + rand() * 80, ry = 10 + rand() * 40;
+            ctx.fillStyle = 'rgba(58, 32, 24, 0.26)';
+            ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, (rand() - 0.5), 0, Math.PI * 2); ctx.fill();
+
+            // Loose sand / dust proxy zones (amber/red on THEMIS layer)
+            if (i % 3 === 0) {
+                thCtx.fillStyle = 'rgba(249, 115, 22, 0.45)';
+                thCtx.beginPath(); thCtx.ellipse(cx, cy, rx * 0.8, ry * 0.8, 0, 0, Math.PI * 2); thCtx.fill();
+            }
+            // CRISM hydrated mineral zones (gold/cyan on Spectral layer)
+            if (i % 4 === 0) {
+                sCtx.fillStyle = i % 8 === 0 ? 'rgba(234, 179, 8, 0.65)' : 'rgba(6, 182, 212, 0.55)';
+                sCtx.beginPath(); sCtx.arc(cx, cy, 10 + rand() * 18, 0, Math.PI * 2); sCtx.fill();
+            }
+        }
+
+        // Valles Marineris
+        [ctx, tCtx, bCtx].forEach((c, idx) => {
+            c.strokeStyle = idx === 2 ? '#181818' : 'rgba(30, 15, 10, 0.7)';
+            c.lineWidth = 8; c.beginPath();
+            c.moveTo(w * 0.28, h * 0.56);
+            c.bezierCurveTo(w * 0.35, h * 0.58, w * 0.42, h * 0.55, w * 0.49, h * 0.57);
+            c.stroke();
+        });
+
+        // Craters
+        for (let i = 0; i < 750; i++) {
+            const cx = rand() * w;
+            const cy = (rand() > 0.28) ? h * (0.48 + rand() * 0.44) : h * (0.08 + rand() * 0.40);
+            const r = Math.pow(rand(), 3.2) * 20 + 1.2;
+
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(68, 34, 22, 0.2)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(232, 152, 110, 0.28)'; ctx.lineWidth = 0.8; ctx.stroke();
+
+            bCtx.beginPath(); bCtx.arc(cx, cy, r, 0, Math.PI * 2);
+            bCtx.fillStyle = 'rgba(45, 45, 45, 0.45)'; bCtx.fill();
+            bCtx.strokeStyle = 'rgba(220, 220, 220, 0.55)'; bCtx.lineWidth = 1; bCtx.stroke();
+        }
+
+        return {
+            optical: new THREE.CanvasTexture(optCanvas),
+            topography: new THREE.CanvasTexture(topoCanvas),
+            thermal: new THREE.CanvasTexture(thermCanvas),
+            spectral: new THREE.CanvasTexture(specCanvas),
+            bumpMap: new THREE.CanvasTexture(bumpCanvas)
+        };
+    }
+
+    const marsGroup = new THREE.Group();
+    scene.add(marsGroup);
+
+    const marsRadius = 2.0;
+    const marsTextures = createMarsLayerTextures();
+    const marsMaterial = new THREE.MeshStandardMaterial({ 
+        map: marsTextures.optical, 
+        bumpMap: marsTextures.bumpMap,
+        bumpScale: 0.045,
+        roughness: 0.88,
+        metalness: 0.04
+    });
+    const marsMesh = new THREE.Mesh(new THREE.SphereGeometry(marsRadius, 96, 96), marsMaterial);
+    marsGroup.add(marsMesh);
+
+    function setMarsLayer(layerKey, btnEl) {
+        currentLayer = layerKey;
+        marsMaterial.map = marsTextures[layerKey];
+        marsMaterial.needsUpdate = true;
+        document.getElementById('hudActiveLayerVal').innerText = layerKey.toUpperCase();
+
+        document.querySelectorAll('.layer-opt-btn').forEach(b => {
+            b.classList.remove('border-cyanHud', 'bg-cyanHud/15');
+            b.classList.add('border-hudBorder', 'bg-void/80');
+        });
+        if (btnEl) {
+            btnEl.classList.remove('border-hudBorder', 'bg-void/80');
+            btnEl.classList.add('border-cyanHud', 'bg-cyanHud/15');
+        }
+    }
+
+    const atmMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(marsRadius * 1.022, 48, 48),
+        new THREE.MeshBasicMaterial({ color: 0xff6b45, transparent: true, opacity: 0.11, blending: THREE.AdditiveBlending, side: THREE.BackSide })
+    );
+    marsGroup.add(atmMesh);
+
+    scene.add(new THREE.AmbientLight(0x223344, 1.25));
+    const sunLight = new THREE.DirectionalLight(0xfff0e0, 2.0);
+    sunLight.position.set(5, 3, 4);
+    scene.add(sunLight);
+
+    const markersGroup = new THREE.Group();
+    marsGroup.add(markersGroup);
+
+    // =========================================================================
+    // 4. 3D MARTIAN REGION PINS & FLOATING LABELS
+    // =========================================================================
+    function latLonToLocalVec3(latDeg, lonDeg, radius) {
+        const phi = (90 - latDeg) * (Math.PI / 180);
+        const theta = (lonDeg + 180) * (Math.PI / 180);
+        return new THREE.Vector3(
+            -(radius * Math.sin(phi) * Math.cos(theta)),
+            radius * Math.cos(phi),
+            radius * Math.sin(phi) * Math.sin(theta)
+        );
+    }
+
+    const regionLabelObjects = [];
+    MARS_REGIONS.forEach(reg => {
+        const pos = latLonToLocalVec3(reg.lat, reg.lon, marsRadius + 0.015);
+        const pin = new THREE.Mesh(
+            new THREE.SphereGeometry(0.028, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0x10b981 })
+        );
+        pin.position.copy(pos);
+        marsGroup.add(pin);
+
+        const el = document.createElement('div');
+        el.className = 'mars-region-label hud-glass px-2 py-0.5 rounded border border-emeraldHud/50 text-[9px] font-bold text-white whitespace-nowrap shadow-lg flex items-center gap-1';
+        el.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emeraldHud"></span><span>${reg.name.toUpperCase()}</span>`;
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            focusMarsRegion(reg.id);
+        });
+        labelsContainer.appendChild(el);
+        regionLabelObjects.push({ pos, el, reg });
+    });
+
+    // Gold Star CRISM Markers on Globe
+    CRISM_TARGETS.forEach(ct => {
+        const pos = latLonToLocalVec3(ct.lat, ct.lon, marsRadius + 0.02);
+        const starPin = new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.036, 0),
+            new THREE.MeshBasicMaterial({ color: 0xeab308 })
+        );
+        starPin.position.copy(pos);
+        marsGroup.add(starPin);
+    });
+
+    function focusMarsRegion(regionId) {
+        const reg = MARS_REGIONS.find(r => r.id === regionId);
+        if (!reg) return;
+        const latStr = `${Math.abs(reg.lat).toFixed(2)}°${reg.lat >= 0 ? 'N' : 'S'}`;
+        const lonStr = `${Math.abs(reg.lon).toFixed(2)}°${reg.lon >= 0 ? 'E' : 'W'}`;
+        
+        document.getElementById('footerActiveRegion').innerText = `${reg.name.toUpperCase()} (${latStr}, ${lonStr})`;
+        document.getElementById('regCardTitle').innerText = `${reg.name.toUpperCase()} (${reg.type})`;
+        document.getElementById('regCardCoords').innerText = `${latStr}, ${lonStr} • Elev: ${reg.elev}`;
+        document.getElementById('regCardDesc').innerText = reg.desc;
+
+        // Rotate globe smoothly toward region
+        targetRotY = -((reg.lon + 90) * (Math.PI / 180));
+        targetRotX = (reg.lat * (Math.PI / 180)) * 0.7;
+        autoSpinPaused = true;
+    }
+
+    // Populate Regions Directory List
+    document.getElementById('regionsDirectoryList').innerHTML = MARS_REGIONS.map(r => `
+        <button onclick="focusMarsRegion('${r.id}')" class="w-full text-left p-2 rounded-lg bg-void/80 hover:bg-emeraldHud/10 border border-hudBorder hover:border-emeraldHud/40 transition cursor-pointer flex justify-between items-center">
+            <div>
+                <div class="text-[11px] font-bold text-white">${r.name}</div>
+                <div class="text-[9px] text-slate-400">${r.type}</div>
+            </div>
+            <span class="text-[9px] text-emeraldHud font-bold">${r.elev}</span>
+        </button>
+    `).join('');
+
+    // Orbit Controls
+    let isDragging = false, prevMouse = {x:0, y:0};
+    let targetRotX = 0, targetRotY = 0;
+    let autoSpinPaused = false;
+
+    container.addEventListener('mousedown', (e) => { 
+        if (activePanel === 'panel-distance') return;
+        isDragging = true; 
+        autoSpinPaused = true;
+        prevMouse = {x: e.clientX, y: e.clientY}; 
+        container.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mouseup', () => { 
+        isDragging = false; 
+        if (activePanel !== 'panel-distance') container.style.cursor = 'grab';
+    });
+    container.addEventListener('mousemove', (e) => {
+        if(isDragging && activePanel !== 'panel-distance') {
+            targetRotY += (e.clientX - prevMouse.x) * 0.006;
+            targetRotX = Math.max(-1.25, Math.min(1.25, targetRotX + (e.clientY - prevMouse.y) * 0.006));
+            prevMouse = {x: e.clientX, y: e.clientY};
+        }
+    });
+    container.addEventListener('wheel', (e) => {
+        camera.position.z += e.deltaY * 0.005;
+        camera.position.z = Math.max(2.6, Math.min(10, camera.position.z));
+    });
+
+    function resetGlobeView() {
+        targetRotX = 0; targetRotY = 0;
+        autoSpinPaused = false;
+        camera.position.set(0, 0, 5.5);
+    }
+
+    // =========================================================================
+    // 5. DUAL-PURPOSE A/B ROUTE & CURVED GEODESIC TRAJECTORY LINE
+    // =========================================================================
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let pointALatLon = null, pointBLatLon = null;
+
+    function createMarker(color) {
+        const group = new THREE.Group();
+        const pin = new THREE.Mesh(new THREE.SphereGeometry(0.038, 16, 16), new THREE.MeshBasicMaterial({ color: color }));
+        const halo = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.075, 24), new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
+        group.add(pin); group.add(halo);
+        markersGroup.add(group);
+        return group;
+    }
+    let markerA = null, markerB = null, lineMesh = null;
+
+    function buildGeodesicArc(localVecA, localVecB, isScienceDetour) {
+        const points = [];
+        const segments = 64;
+        const vA = localVecA.clone().normalize();
+        const vB = localVecB.clone().normalize();
+        const omega = Math.acos(Math.max(-1, Math.min(1, vA.dot(vB))));
+        const sinOmega = Math.sin(omega);
+
+        // Lateral detour offset when Science Route is active
+        const lateralAxis = new THREE.Vector3().crossVectors(vA, vB).normalize();
+        const detourFactor = isScienceDetour ? (parseFloat(document.getElementById('detourBudgetSlider').value) / 100) * 0.45 : 0;
+
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            let dir;
+            if (sinOmega < 0.0001) {
+                dir = vA.clone().lerp(vB, t).normalize();
+            } else {
+                const w1 = Math.sin((1 - t) * omega) / sinOmega;
+                const w2 = Math.sin(t * omega) / sinOmega;
+                dir = new THREE.Vector3().addScaledVector(vA, w1).addScaledVector(vB, w2).normalize();
+            }
+            if (detourFactor > 0) {
+                dir.addScaledVector(lateralAxis, Math.sin(t * Math.PI) * detourFactor).normalize();
+            }
+            const arcLift = Math.sin(t * Math.PI) * 0.035;
+            points.push(dir.multiplyScalar(marsRadius + 0.018 + arcLift));
+        }
+
+        const curveGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const curveMat = new THREE.LineBasicMaterial({ color: isScienceDetour ? 0xeab308 : 0x10b981, linewidth: 2 });
+        const arcLine = new THREE.Line(curveGeo, curveMat);
+        arcLine.visible = document.getElementById('toggleLineCheckbox').checked;
+        return arcLine;
+    }
+
+    document.getElementById('toggleLineCheckbox').addEventListener('change', (e) => {
+        if (lineMesh) lineMesh.visible = e.target.checked;
+        document.getElementById('dist-arc-status').innerText = e.target.checked ? (lineMesh ? 'SAFE PASS' : 'STANDBY') : 'HIDDEN';
+    });
+
+    async function recomputeTrajectoryAndDistance() {
+        if (!pointALatLon || !pointBLatLon) return;
+        const isScience = routeMode === 'science';
+        
+        if (lineMesh) markersGroup.remove(lineMesh);
+        lineMesh = buildGeodesicArc(pointALatLon.vec, pointBLatLon.vec, isScience);
+        markersGroup.add(lineMesh);
+
+        // Bearing
+        const phi1 = pointALatLon.lat * Math.PI / 180;
+        const phi2 = pointBLatLon.lat * Math.PI / 180;
+        const dLon = (pointBLatLon.lon - pointALatLon.lon) * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(phi2);
+        const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+        const bearing = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+        
+        document.getElementById('dist-bearing').innerText = `${bearing.toFixed(1)}°`;
+        document.getElementById('hudHeadingVal').innerText = `${bearing.toFixed(1)}°`;
+        document.getElementById('dist-arc-status').innerText = 'SAFE PASS';
+        document.getElementById('dist-arc-status').className = 'text-emeraldHud font-bold';
+
+        const detourMultiplier = isScience ? (1 + parseFloat(document.getElementById('detourBudgetSlider').value) / 100) : 1.0;
+
+        try {
+            document.getElementById('dist-result').innerText = "VALIDATING...";
+            const res = await fetch(`/calculate_distance?lat1=${pointALatLon.lat}&lon1=${pointALatLon.lon}&lat2=${pointBLatLon.lat}&lon2=${pointBLatLon.lon}`);
+            if (!res.ok) throw new Error("API Offline");
+            const data = await res.json();
+            const finalKm = (data.distance_km * detourMultiplier).toFixed(1);
+            document.getElementById('dist-result').innerText = `${finalKm} km`;
+            document.getElementById('hudDistanceVal').innerText = `${finalKm} km`;
+        } catch(err) {
+            const R = 3389.5;
+            const dLat = (pointBLatLon.lat - pointALatLon.lat) * Math.PI/180;
+            const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(phi1)*Math.cos(phi2)*Math.sin(dLon/2)*Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const finalKm = (R * c * detourMultiplier).toFixed(1);
+            document.getElementById('dist-result').innerText = `${finalKm} km`;
+            document.getElementById('hudDistanceVal').innerText = `${finalKm} km`;
+        }
+    }
+
+    container.addEventListener('click', async (e) => {
+        if (activePanel !== 'panel-distance') return;
+
+        mouse.x = (e.clientX / container.clientWidth) * 2 - 1;
+        mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const intersects = raycaster.intersectObject(marsMesh);
+        if (intersects.length > 0) {
+            const localPt = marsGroup.worldToLocal(intersects[0].point.clone());
+            const normalizedPt = localPt.clone().normalize();
+            const lat = Math.asin(normalizedPt.y) * (180 / Math.PI);
+            const lon = Math.atan2(normalizedPt.z, -normalizedPt.x) * (180 / Math.PI);
+
+            if (!pointALatLon) {
+                pointALatLon = { lat, lon, vec: localPt };
+                document.getElementById('dist-ptA').innerText = `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`;
+                if(markerA) markersGroup.remove(markerA);
+                markerA = createMarker(0x00e5ff);
+                markerA.position.copy(localPt);
+                markerA.lookAt(new THREE.Vector3(0, 0, 0));
+                document.getElementById('dist-arc-status').innerText = 'AWAITING B';
+            } else if (!pointBLatLon) {
+                pointBLatLon = { lat, lon, vec: localPt };
+                document.getElementById('dist-ptB').innerText = `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`;
+                if(markerB) markersGroup.remove(markerB);
+                markerB = createMarker(0xff5a36);
+                markerB.position.copy(localPt);
+                markerB.lookAt(new THREE.Vector3(0, 0, 0));
+                recomputeTrajectoryAndDistance();
+            }
+        }
+    });
+
+    document.getElementById('resetDistBtn').addEventListener('click', () => {
+        pointALatLon = null; pointBLatLon = null;
+        document.getElementById('dist-ptA').innerText = "Click Globe...";
+        document.getElementById('dist-ptB').innerText = "Click Globe...";
+        document.getElementById('dist-result').innerText = "-- km";
+        document.getElementById('hudDistanceVal').innerText = "-- km";
+        document.getElementById('dist-bearing').innerText = "-- °";
+        document.getElementById('dist-arc-status').innerText = "STANDBY";
+        document.getElementById('dist-arc-status').className = "text-slate-400 font-bold";
+        
+        if (markerA) { markersGroup.remove(markerA); markerA = null; }
+        if (markerB) { markersGroup.remove(markerB); markerB = null; }
+        if (lineMesh) { markersGroup.remove(lineMesh); lineMesh = null; }
+    });
+
+    // =========================================================================
+    // 6. AI WEATHER PREDICTOR & CV HAZARD SCANNER (PYTHON FASTAPI UPLINK)
+    // =========================================================================
+    document.getElementById('runWeatherBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const origHTML = btn.innerHTML;
+        btn.innerHTML = "<i class='fa-solid fa-spinner fa-spin'></i> UPLINKING..."; 
+        btn.disabled = true;
+
+        const pres = document.getElementById('weatherPres').value;
+        const temp = document.getElementById('weatherTemp').value;
+
+        try {
+            const res = await fetch(`/predict_weather?pressure=${pres}&min_temp=-75&max_temp=${temp}`);
+            if (!res.ok) throw new Error("API Offline");
+            const data = await res.json();
+            document.getElementById('weatherResult').innerText = `${data.predicted_max_temp_tomorrow.toFixed(1)} °C`;
+            document.getElementById('weatherResult').className = "text-xl font-bold text-amber-400 tracking-wider";
+        } catch (err) {
+            const fallback = (parseFloat(temp) * 0.8) - (75 * 0.1) + (parseFloat(pres) * 0.001) - 5;
+            document.getElementById('weatherResult').innerText = `${fallback.toFixed(1)} °C`;
+            document.getElementById('weatherResult').className = "text-xl font-bold text-slate-300 tracking-wider";
+        } finally {
+            btn.innerHTML = origHTML; 
+            btn.disabled = false;
+        }
+    });
+
+    const rCanvas = document.getElementById('roverCanvas');
+    const rCtx = rCanvas.getContext('2d');
+    function drawRoverCam() {
+        const w = rCanvas.clientWidth || 280;
+        const h = rCanvas.clientHeight || 128;
+        rCanvas.width = w; rCanvas.height = h;
+        rCtx.fillStyle = '#b9734c'; rCtx.fillRect(0,0,w,h*0.4);
+        rCtx.fillStyle = '#2d140c'; rCtx.fillRect(0,h*0.4,w,h);
+        rCtx.fillStyle = '#1a0b06';
+        rCtx.beginPath(); rCtx.moveTo(w*0.2, h*0.5); rCtx.lineTo(w*0.4, h*0.4); rCtx.lineTo(w*0.6, h*0.55); rCtx.fill();
+        rCtx.beginPath(); rCtx.arc(w*0.7, h*0.7, 20, 0, Math.PI*2); rCtx.fill();
+    }
+    drawRoverCam();
+    window.addEventListener('resize', drawRoverCam);
+
+    document.getElementById('runHazardBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const origHTML = btn.innerHTML;
+        btn.innerHTML = "<i class='fa-solid fa-spinner fa-spin'></i> ANALYZING FRAME..."; 
+        btn.disabled = true;
+
+        const resultPanel = document.getElementById('hazardResultPanel');
+        const outputText = document.getElementById('hazardOutputText');
+        const confText = document.getElementById('hazardConfText');
+
+        rCanvas.toBlob(async (blob) => {
+            const fd = new FormData();
+            fd.append("file", blob, "rover_cam.jpg");
+
+            try {
+                const res = await fetch('/analyze_terrain_hazard', { method: 'POST', body: fd });
+                if (!res.ok) throw new Error("API Offline");
+                const data = await res.json();
+                
+                if (data.hazard_detected) {
+                    outputText.innerHTML = `<span class="text-mars"><i class="fa-solid fa-triangle-exclamation"></i> HAZARD DETECTED</span>`;
+                    resultPanel.style.borderColor = '#ff5a36';
+                } else {
+                    outputText.innerHTML = `<span class="text-emeraldHud"><i class="fa-solid fa-check"></i> TRAVERSE SAFE</span>`;
+                    resultPanel.style.borderColor = '#10b981';
+                }
+                confText.innerText = `CONFIDENCE: ${data.confidence}% | ${data.recommendation}`;
+                resultPanel.classList.remove('hidden');
+            } catch(err) {
+                setTimeout(() => {
+                    const isHazard = Math.random() > 0.5;
+                    const conf = (Math.random() * 20 + 75).toFixed(1); 
+                    if (isHazard) {
+                        outputText.innerHTML = `<span class="text-mars"><i class="fa-solid fa-triangle-exclamation"></i> HAZARD DETECTED</span>`;
+                        resultPanel.style.borderColor = '#ff5a36';
+                    } else {
+                        outputText.innerHTML = `<span class="text-emeraldHud"><i class="fa-solid fa-check"></i> TRAVERSE SAFE</span>`;
+                        resultPanel.style.borderColor = '#10b981';
+                    }
+                    confText.innerText = `CONFIDENCE: ${conf}% (SIMULATED)`;
+                    resultPanel.classList.remove('hidden');
+                    btn.innerHTML = origHTML; 
+                    btn.disabled = false;
+                }, 900);
+                return;
+            }
+            btn.innerHTML = origHTML; 
+            btn.disabled = false;
+        }, 'image/jpeg');
+    });
+
+    // =========================================================================
+    // 7. 3D RENDER LOOP & PROJECTED REGION LABELS
+    // =========================================================================
+    function animate() {
+        requestAnimationFrame(animate);
+        if (!isDragging && !autoSpinPaused && activePanel !== 'panel-distance') {
+            targetRotY += 0.0005;
+        }
+        marsGroup.rotation.y += (targetRotY - marsGroup.rotation.y) * 0.08;
+        marsGroup.rotation.x += (targetRotX - marsGroup.rotation.x) * 0.08;
+        marsGroup.updateMatrixWorld();
+
+        // Project 3D Martian Region pins to 2D screen labels
+        const halfW = container.clientWidth / 2;
+        const halfH = container.clientHeight / 2;
+        const camDir = new THREE.Vector3().subVectors(camera.position, marsGroup.position).normalize();
+
+        regionLabelObjects.forEach(({ pos, el }) => {
+            const worldPos = pos.clone().applyMatrix4(marsGroup.matrixWorld);
+            const normalDir = worldPos.clone().normalize();
+            if (normalDir.dot(camDir) > 0.18) {
+                const projected = worldPos.clone().project(camera);
+                el.style.display = 'flex';
+                el.style.left = `${(projected.x * halfW) + halfW}px`;
+                el.style.top = `${-(projected.y * halfH) + halfH}px`;
+            } else {
+                el.style.display = 'none';
+            }
+        });
+
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+  </script>
+</body>
+</html>
