@@ -33,26 +33,44 @@ vision_model = None
 
 def train_weather_model():
     global weather_model
+    trained = False
+
     if os.path.exists(REMS_CSV_PATH):
-        df = pd.read_csv(REMS_CSV_PATH)
-        df = df[["pressure", "max_temp"]].apply(pd.to_numeric, errors="coerce").dropna()
-        df["next_max_temp"] = df["max_temp"].shift(-1)
-        df = df.dropna()
+        try:
+            df = pd.read_csv(REMS_CSV_PATH)
+            df.columns = [c.strip() for c in df.columns]
 
-        X = df[["pressure", "max_temp"]].values
-        y = df["next_max_temp"].values
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            # Auto-detect pressure and max temperature columns regardless of casing
+            p_col = next((c for c in df.columns if "press" in c.lower()), None)
+            t_col = next((c for c in df.columns if "max" in c.lower() and "temp" in c.lower()), None)
+            if not t_col:
+                t_col = next((c for c in df.columns if "temp" in c.lower()), None)
 
-        model = RandomForestRegressor(n_estimators=60, max_depth=10, random_state=42)
-        model.fit(X_train, y_train)
-        mse = mean_squared_error(y_test, model.predict(X_test))
-        print(f"Weather Model Trained on {len(df)} sols | MSE: {mse:.2f} °C²")
-    else:
+            if p_col and t_col:
+                sub = df[[p_col, t_col]].apply(pd.to_numeric, errors="coerce").dropna()
+                sub["next_max_temp"] = sub[t_col].shift(-1)
+                sub = sub.dropna()
+
+                if len(sub) >= 10:
+                    X = sub[[p_col, t_col]].values
+                    y = sub["next_max_temp"].values
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+                    model = RandomForestRegressor(n_estimators=60, max_depth=10, random_state=42)
+                    model.fit(X_train, y_train)
+                    mse = mean_squared_error(y_test, model.predict(X_test))
+                    print(f"Weather Model Trained on {len(sub)} sols ({p_col}, {t_col}) | MSE: {mse:.2f} °C²")
+                    trained = True
+        except Exception as e:
+            print(f"CSV parsing fallback triggered: {e}")
+
+    if not trained:
+        rng = np.random.default_rng(42)
         X_synth = np.column_stack([
-            np.random.uniform(700, 900, 300),
-            np.random.uniform(-35, 0, 300)
+            rng.uniform(700, 900, 300),
+            rng.uniform(-35, 0, 300)
         ])
-        y_synth = X_synth[:, 1] + np.random.normal(0, 2.5, 300)
+        y_synth = X_synth[:, 1] + rng.normal(0, 2.5, 300)
         model = RandomForestRegressor(n_estimators=40, random_state=42)
         model.fit(X_synth, y_synth)
         print("Weather Model Trained on fallback synthetic data.")
@@ -90,13 +108,11 @@ def train_vision_model():
         draw = ImageDraw.Draw(img)
 
         if not is_hazard:
-            # Safe flat regolith with minor pebbles
             for _ in range(15):
                 x0, y0 = int(rng.integers(0, 60)), int(rng.integers(0, 60))
                 c = int(rng.integers(140, 185))
                 draw.ellipse([x0, y0, x0 + 3, y0 + 3], fill=(c, int(c * 0.55), int(c * 0.35)))
         else:
-            # Steep dark crater scarps / sharp shadows or bright loose dust traps
             if i % 4 == 1:
                 draw.polygon([(0, 45), (30, 12), (64, 38), (64, 64), (0, 64)], fill=(28, 16, 12))
                 draw.line([(0, 45), (30, 12), (64, 38)], fill=(230, 160, 110), width=2)
